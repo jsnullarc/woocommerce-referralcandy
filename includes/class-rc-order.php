@@ -24,11 +24,14 @@ class RC_Order {
     public $user_agent;
     public $referrer_id;
 
-    public function __construct($wc_order_id) {
+    public function __construct($wc_order_id, WC_Referralcandy_Integration $integration) {
         $wc_order   = new WC_Order($wc_order_id);
         $order_data = $wc_order->get_data();
 
         $this->wc_pre_30        = version_compare(WC_VERSION, '3.0.0', '<');
+        $this->api_id           = $integration->api_id;
+        $this->secret_key       = $integration->secret_key;
+        $this->referrer_id      = null;
         $this->first_name       = $order_data['billing']['first_name'];
         $this->last_name        = $order_data['billing']['last_name'];
         $this->email            = $order_data['billing']['email'];
@@ -36,32 +39,6 @@ class RC_Order {
         $this->currency         = $order_data['currency'];
         $this->order_number     = $order_data['id'];
         $this->order_timestamp  = $order_data['date_created']->getTimestamp();
-
-        foreach($wc_order->get_meta_data() as $i => $meta_data) {
-            $data = $meta_data->get_data();
-
-            switch($data['key']) {
-                case 'api_id':
-                    $this->api_id = $data['value'];
-                    break;
-
-                case 'secret_key':
-                    $this->secret_key = $data['value'];
-                    break;
-
-                case 'browser_ip':
-                    $this->browser_ip = $data['value'];
-                    break;
-
-                case 'user_agent':
-                    $this->user_agent = $data['value'];
-                    break;
-
-                case 'referrer_id':
-                    $this->referrer_id = $data['value'];
-                    break;
-            }
-        }
     }
 
     private function generate_post_fields($specific_keys = [], $additional_keys = []) {
@@ -137,6 +114,34 @@ class RC_Order {
 
         if (!empty($this->secret_key) && !empty($this->api_id)) {
             $params     = $this->generate_request_body($this->generate_post_fields());
+            $response   = wp_safe_remote_post($endpoint, $params);
+
+            error_log(
+                '** API request to: '. $endpoint .' START **
+                Request Params: {'. implode(',', $params['body']) .'}
+                Request Reponse: '. $response['body'] .'
+                ** END **'
+            );
+        }
+    }
+
+    // https://www.referralcandy.com/api#referral
+    public function remove_referral() {
+        $endpoint = join('/', [$this->base_url, 'referral.json']);
+
+        error_log(json_encode(!empty($this->secret_key) && !empty($this->api_id)));
+
+        if (!empty($this->secret_key) && !empty($this->api_id)) {
+            $post_fields = $this->generate_post_fields(
+                ['accessID', 'timestamp'],
+                [
+                    'customer_email' => $this->email,
+                    'notify' => 'false',
+                    'returned' => 'true',
+                ]
+            );
+
+            $params     = $this->generate_request_body($post_fields);
             $response   = wp_safe_remote_post($endpoint, $params);
 
             error_log(
